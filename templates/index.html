@@ -122,16 +122,21 @@
             font-weight: 600;
             color: rgba(255,255,255,0.6);
         }
-        .timeline-segment.warmup { background: rgba(245,158,11,0.25); flex: 5; }
-        .timeline-segment.main { background: rgba(74,222,128,0.25); flex: 50; }
-        .timeline-segment.cooldown { background: rgba(96,165,250,0.25); flex: 5; }
+        .timeline-segment.warmup { background: rgba(245,158,11,0.25); }
+        .timeline-segment.main { background: rgba(74,222,128,0.25); }
+        .timeline-segment.cooldown { background: rgba(96,165,250,0.25); }
+        .timeline-segment.interval { background: rgba(239,68,68,0.25); }
+        .timeline-segment.recovery { background: rgba(96,165,250,0.25); }
 
         .timeline-segment.active { color: #fff; }
         .timeline-segment.active.warmup { background: rgba(245,158,11,0.5); }
         .timeline-segment.active.main { background: rgba(74,222,128,0.5); }
         .timeline-segment.active.cooldown { background: rgba(96,165,250,0.5); }
+        .timeline-segment.active.interval { background: rgba(239,68,68,0.5); }
+        .timeline-segment.active.recovery { background: rgba(96,165,250,0.5); }
 
         .timeline-segment.completed { background: rgba(74,222,128,0.7); color: #fff; }
+        .timeline-segment.completed.interval { background: rgba(239,68,68,0.7); }
 
         .progress-marker {
             position: absolute;
@@ -604,10 +609,8 @@
                 <span class="phase-badge not_started" id="phase-badge">Ready</span>
                 <span class="timer-display" id="timer">00:00:00</span>
             </div>
-            <div class="workout-timeline">
-                <div class="timeline-segment warmup" id="seg-warmup">Warmup</div>
-                <div class="timeline-segment main" id="seg-main">Zone 2 @ <span id="z2-pwr">150</span>W</div>
-                <div class="timeline-segment cooldown" id="seg-cooldown">Cool</div>
+            <div class="workout-timeline" id="workout-timeline">
+                <!-- Timeline segments will be dynamically generated -->
                 <div class="progress-marker" id="progress-marker" style="left: 0%"></div>
             </div>
         </div>
@@ -829,12 +832,18 @@
             updateTrainerList();
         });
 
+        // HR targeting state
+        let hrTargetMode = false;
+        let hrTarget = 133;
+
         socket.on('config', d => {
+            console.log('Full config received:', d);
+            console.log('workout_types in config:', d.workout_types);
+
             ftp = d.ftp;
             document.getElementById('ftp-in').value = ftp;
             document.getElementById('z2-target').textContent = `${d.zone2_power}W`;
             document.getElementById('z2-range').textContent = d.zone2_range;
-            document.getElementById('z2-pwr').textContent = d.zone2_power;
             document.getElementById('audio-chk').checked = d.audio_enabled;
             // Sync mute button with audio setting
             audioMuted = !d.audio_enabled;
@@ -842,11 +851,23 @@
             btn.textContent = audioMuted ? '🔇' : '🔊';
             btn.classList.toggle('muted', audioMuted);
 
+            // HR targeting info
+            hrTargetMode = d.hr_target_mode || false;
+            hrTarget = d.hr_target || 133;
+
             // Populate workout types
-            if (d.workout_types) {
+            if (d.workout_types && Array.isArray(d.workout_types) && d.workout_types.length > 0) {
+                console.log('Processing workout types:', d.workout_types);
                 workoutTypes = d.workout_types;
                 currentWorkoutType = d.current_workout_type || 'zone2';
                 updateWorkoutSelector();
+            } else {
+                console.warn('No workout types received in config. d.workout_types =', d.workout_types);
+            }
+
+            // Build the timeline from segments
+            if (d.segments && d.segments.length > 0) {
+                buildTimeline(d.segments, hrTargetMode, hrTarget, d.zone2_power);
             }
         });
 
@@ -919,15 +940,31 @@
             const e = d.elapsed_seconds;
             document.getElementById('timer').textContent = `${Math.floor(e/3600).toString().padStart(2,'0')}:${Math.floor((e%3600)/60).toString().padStart(2,'0')}:${(e%60).toString().padStart(2,'0')}`;
 
-            document.getElementById('seg-warmup').classList.toggle('active', d.phase === 'warmup');
-            document.getElementById('seg-main').classList.toggle('active', d.phase === 'main');
-            document.getElementById('seg-cooldown').classList.toggle('active', d.phase === 'cooldown');
+            // Update segment highlighting based on elapsed time
+            if (currentSegments.length > 0) {
+                let accumulatedTime = 0;
+                const elapsedMinutes = d.elapsed_seconds / 60;
 
-            if (d.phase === 'main' || d.phase === 'cooldown' || d.phase === 'completed') {
-                document.getElementById('seg-warmup').classList.add('completed');
-            }
-            if (d.phase === 'cooldown' || d.phase === 'completed') {
-                document.getElementById('seg-main').classList.add('completed');
+                currentSegments.forEach((seg, idx) => {
+                    const segEl = document.getElementById(`seg-${idx}`);
+                    if (!segEl) return;
+
+                    const segStart = accumulatedTime;
+                    const segEnd = accumulatedTime + seg.duration_minutes;
+
+                    // Check if this segment is active or completed
+                    if (elapsedMinutes >= segEnd) {
+                        segEl.classList.add('completed');
+                        segEl.classList.remove('active');
+                    } else if (elapsedMinutes >= segStart) {
+                        segEl.classList.add('active');
+                        segEl.classList.remove('completed');
+                    } else {
+                        segEl.classList.remove('active', 'completed');
+                    }
+
+                    accumulatedTime = segEnd;
+                });
             }
         });
 
@@ -950,6 +987,13 @@
                 showFlashAlert(d.message, d.severity);
             }
         });
+
+        socket.on('hr_adjustment', d => {
+            // HR-targeted mode adjusted power
+            const direction = d.new_power > targetPower ? '↑' : '↓';
+            showAlert(`HR adjust: ${direction} ${d.new_power}W (HR target: ${d.hr_target})`, 'success');
+        });
+
         socket.on('workout_saved', d => showAlert(`Saved: ${d.filename.split('/').pop()}`, 'success'));
         socket.on('workout_complete', () => {
             workoutActive = false;
@@ -1046,15 +1090,85 @@
             socket.emit('update_settings', { audio_enabled: audioEnabled });
         }
 
+        // Store current segments for timeline
+        let currentSegments = [];
+
         function updateWorkoutSelector() {
+            console.log('updateWorkoutSelector called, workoutTypes:', workoutTypes);
             const select = document.getElementById('workout-select');
-            select.innerHTML = workoutTypes.map(w => {
+            if (!select) {
+                console.error('workout-select element not found');
+                return;
+            }
+            if (workoutTypes.length === 0) {
+                console.warn('workoutTypes is empty');
+                return;
+            }
+            const options = workoutTypes.map(w => {
                 const hint = w.id === 'vo2max' ? ' (best if 1x/week cycling)' : '';
                 return `<option value="${w.id}" ${w.id === currentWorkoutType ? 'selected' : ''}>${w.name}${hint}</option>`;
             }).join('');
+            console.log('Setting select innerHTML to:', options);
+            select.innerHTML = options;
 
             // Update hint and duration
             updateWorkoutDisplay(currentWorkoutType);
+        }
+
+        function buildTimeline(segments, hrTargetMode, hrTarget, zone2Power) {
+            const timeline = document.getElementById('workout-timeline');
+            if (!timeline || !segments || segments.length === 0) return;
+
+            // Store segments for later use
+            currentSegments = segments;
+
+            // Calculate total duration
+            const totalDuration = segments.reduce((sum, s) => sum + s.duration_minutes, 0);
+
+            // Clear existing segments (keep the progress marker)
+            const marker = document.getElementById('progress-marker');
+            timeline.innerHTML = '';
+
+            // Build segment elements
+            segments.forEach((seg, idx) => {
+                const div = document.createElement('div');
+                const widthPercent = (seg.duration_minutes / totalDuration) * 100;
+
+                // Use the phase directly as the class
+                const phaseClass = seg.phase || 'main';
+
+                div.className = `timeline-segment ${phaseClass}`;
+                div.id = `seg-${idx}`;
+                div.style.flex = `${widthPercent} 0 0`;
+
+                // Build label based on segment type
+                let label = '';
+                if (seg.duration_minutes >= 2) {
+                    if (seg.phase === 'warmup') {
+                        label = `Warmup`;
+                    } else if (seg.phase === 'cooldown') {
+                        label = `Cool`;
+                    } else if (seg.phase === 'main' && hrTargetMode) {
+                        label = `HR: ${hrTarget}`;
+                    } else if (seg.phase === 'main') {
+                        label = `${seg.power_start}W`;
+                    } else if (seg.phase === 'interval') {
+                        label = `${seg.power_start}W`;
+                    } else if (seg.phase === 'recovery') {
+                        label = `Rest`;
+                    }
+                }
+
+                div.innerHTML = `<span>${label}</span>`;
+                timeline.appendChild(div);
+            });
+
+            // Re-add progress marker
+            const newMarker = document.createElement('div');
+            newMarker.className = 'progress-marker';
+            newMarker.id = 'progress-marker';
+            newMarker.style.left = '0%';
+            timeline.appendChild(newMarker);
         }
 
         function updateWorkoutDisplay(workoutId) {

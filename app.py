@@ -58,8 +58,12 @@ ble_manager = BLEManager(
     hr_name=config['devices']['hr_monitor_name']
 )
 
-# Initialize workout manager with FTP
-workout_manager = WorkoutManager(ftp=config['user']['ftp'])
+# Initialize workout manager with FTP and HR zones
+workout_manager = WorkoutManager(
+    ftp=config['user']['ftp'],
+    hr_zone2_low=config['user']['zone2_hr_low'],
+    hr_zone2_high=config['user']['zone2_hr_high']
+)
 
 # Zone analyzer for heart rate monitoring
 zone_analyzer = ZoneAnalyzer(
@@ -169,12 +173,24 @@ def on_power_change(power: int):
 def on_phase_change(phase: WorkoutPhase, name: str):
     """Called when workout phase changes."""
     print(f"Workout phase: {name}")
-    messages = {
-        WorkoutPhase.WARMUP: f"Starting warmup. Ramping to {workout_manager.config.zone2_power} watts.",
-        WorkoutPhase.MAIN: f"Warmup complete. Main set: {workout_manager.config.zone2_power} watts for 50 minutes.",
-        WorkoutPhase.COOLDOWN: "Starting cooldown. Ramping down.",
-        WorkoutPhase.COMPLETED: "Workout complete!"
-    }
+
+    # Build appropriate message based on workout type and phase
+    if workout_manager.current_workout_type == "zone2":
+        messages = {
+            WorkoutPhase.WARMUP: f"Starting warmup. Ramping to {workout_manager.config.zone2_power} watts.",
+            WorkoutPhase.MAIN: f"Warmup complete. HR-targeted Zone 2. Power will auto-adjust to keep HR at {workout_manager.hr_target} BPM.",
+            WorkoutPhase.COOLDOWN: "Starting cooldown. Ramping down.",
+            WorkoutPhase.COMPLETED: "Workout complete!"
+        }
+    else:
+        messages = {
+            WorkoutPhase.WARMUP: f"Starting warmup.",
+            WorkoutPhase.MAIN: f"Main set starting. Hold your effort!",
+            WorkoutPhase.INTERVAL: f"{name} - push hard!",
+            WorkoutPhase.RECOVERY: f"{name} - easy spinning.",
+            WorkoutPhase.COOLDOWN: "Starting cooldown. Ramping down.",
+            WorkoutPhase.COMPLETED: "Workout complete!"
+        }
     alert_manager.announce(messages.get(phase, name))
     socketio.emit('phase_change', {'phase': phase.value, 'name': name})
 
@@ -222,24 +238,50 @@ def on_hr_data(data: HRData):
     if workout_active:
         bike_data = ble_manager.get_last_bike_data()
 
-        # Update analyzer (now tracking power zones)
-        # Only trigger HR zone alerts during main phase, not warmup/cooldown
-        current_phase = workout_manager.current_phase.value
-        alerts = zone_analyzer.update(
-            hr=data.heart_rate,
-            power=bike_data.power,
-            cadence=bike_data.cadence,
-            phase=current_phase
-        )
+        # Feed HR to workout manager for HR-targeted power control
+        workout_manager.add_hr_sample(data.heart_rate)
 
-        # Send alerts
-        for alert in alerts:
-            alert_manager.alert(alert.type, alert.message, alert.severity)
-            socketio.emit('alert', {
-                'type': alert.type,
-                'message': alert.message,
-                'severity': alert.severity
-            })
+        # Check if HR-targeted mode wants to adjust power
+        if workout_manager.is_hr_target_mode:
+            new_power = workout_manager.get_hr_adjusted_power()
+            if new_power is not None:
+                # Power target changed based on HR, update ERG
+                run_async(ble_manager.set_target_power(new_power))
+                socketio.emit('erg_power', {'target': new_power})
+                socketio.emit('hr_adjustment', {
+                    'new_power': new_power,
+                    'hr_target': workout_manager.hr_target,
+                    'current_hr': data.heart_rate
+                })
+
+        # Update analyzer (now tracking power zones)
+        # Only trigger HR zone alerts during main phase if NOT in HR-target mode
+        # (HR-target mode auto-adjusts, so no need to nag the user)
+        current_phase = workout_manager.current_phase.value
+        if not workout_manager.is_hr_target_mode:
+            alerts = zone_analyzer.update(
+                hr=data.heart_rate,
+                power=bike_data.power,
+                cadence=bike_data.cadence,
+                phase=current_phase
+            )
+
+            # Send alerts
+            for alert in alerts:
+                alert_manager.alert(alert.type, alert.message, alert.severity)
+                socketio.emit('alert', {
+                    'type': alert.type,
+                    'message': alert.message,
+                    'severity': alert.severity
+                })
+        else:
+            # Still update stats even in HR-target mode
+            zone_analyzer.update(
+                hr=data.heart_rate,
+                power=bike_data.power,
+                cadence=bike_data.cadence,
+                phase=current_phase
+            )
 
         # Send updated stats
         stats = zone_analyzer.get_stats()
@@ -286,6 +328,18 @@ def handle_connect():
 def handle_get_config():
     """Send current configuration to client."""
     summary = workout_manager.get_workout_summary()
+    try:
+        workout_types = workout_manager.get_workout_types()
+        print(f"Sending config with {len(workout_types)} workout types: {[w['id'] for w in workout_types]}")
+    except Exception as e:
+        print(f"ERROR getting workout types: {e}")
+        # Fallback to hardcoded list
+        workout_types = [
+            {"id": "zone2", "name": "Zone 2 (HR Targeted)", "description": "HR-targeted endurance", "frequency_hint": "Power auto-adjusts to maintain target HR", "duration_minutes": 60, "intensity": "Low"},
+            {"id": "vo2max", "name": "VO2max Intervals", "description": "5x3min hard intervals", "frequency_hint": "1x per week", "duration_minutes": 35, "intensity": "High"},
+            {"id": "sweet_spot", "name": "Sweet Spot", "description": "2x20min @ 88-93% FTP", "frequency_hint": "1x per week", "duration_minutes": 55, "intensity": "Medium-High"},
+            {"id": "tempo", "name": "Tempo/Threshold", "description": "2x15min @ 95-100% FTP", "frequency_hint": "1x per week", "duration_minutes": 45, "intensity": "High"}
+        ]
     socketio.emit('config', {
         'ftp': config['user']['ftp'],
         'zone2_power': summary['zone2_power'],
@@ -295,8 +349,12 @@ def handle_get_config():
         'workout_duration_minutes': summary['total_duration_minutes'],
         'audio_enabled': config['alerts']['audio_enabled'],
         'segments': summary['segments'],
-        'workout_types': workout_manager.get_workout_types(),
-        'current_workout_type': workout_manager.current_workout_type
+        'workout_types': workout_types,
+        'current_workout_type': workout_manager.current_workout_type,
+        'hr_target': summary['hr_target'],
+        'hr_zone2_low': summary['hr_zone2_low'],
+        'hr_zone2_high': summary['hr_zone2_high'],
+        'hr_target_mode': summary['hr_target_mode']
     })
 
 
@@ -489,11 +547,18 @@ def handle_update_hr_zones(data):
             low=data['zone2_hr_low'],
             high=data['zone2_hr_high']
         )
-        print(f"HR zones updated: {data['zone2_hr_low']}-{data['zone2_hr_high']} BPM")
-        # Optionally, send updated config or a confirmation
+
+        # Also update workout manager's HR targets
+        workout_manager.set_hr_zones(
+            hr_low=data['zone2_hr_low'],
+            hr_high=data['zone2_hr_high']
+        )
+
+        print(f"HR zones updated: {data['zone2_hr_low']}-{data['zone2_hr_high']} BPM (target: {workout_manager.hr_target})")
         socketio.emit('hr_zones_updated', {
             'zone2_hr_low': data['zone2_hr_low'],
-            'zone2_hr_high': data['zone2_hr_high']
+            'zone2_hr_high': data['zone2_hr_high'],
+            'hr_target': workout_manager.hr_target
         })
 
 
