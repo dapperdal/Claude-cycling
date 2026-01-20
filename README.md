@@ -1,11 +1,3 @@
-# Claude-cycling
-A cycling app to be ran from mac os browser - with a few basic workouts to support Push, pull Legs workout.
-
-As i dont need a full featured cycling app, this will keep me on track
-
------------------------------------------------------------------------------------------------------------------------
-
-
 # Indoor Cycling Workout Controller
 
 A local web app to control your smart trainer, run structured power-based workouts, and record your indoor cycling sessions.

@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zone 2 Power Training</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.0/socket.io.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            height: 100vh;
+            overflow: hidden;
+            padding: 12px 20px;
+        }
+
+        .app {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            gap: 10px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        h1 { font-size: 1.1rem; font-weight: 600; }
+
+        .badges {
+            display: flex;
+            gap: 8px;
+        }
+
+        .badge {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            background: #2a2a4a;
+            border-radius: 12px;
+            font-size: 0.65rem;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #555;
+        }
+        .dot.on { background: #4ade80; box-shadow: 0 0 8px #4ade80; }
+
+        .settings-btn {
+            background: #2a2a4a;
+            border: none;
+            color: #888;
+            padding: 5px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.7rem;
+        }
+        .settings-btn:hover { background: #3a3a5a; color: #eee; }
+
+        /* Workout Timeline */
+        .workout-timeline-bar {
+            background: #2a2a4a;
+            border-radius: 10px;
+            padding: 10px 15px;
+        }
+
+        .timeline-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .phase-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .phase-badge.warmup { background: #f59e0b; color: #1a1a2e; }
+        .phase-badge.main { background: #4ade80; color: #1a1a2e; }
+        .phase-badge.cooldown { background: #60a5fa; color: #1a1a2e; }
+        .phase-badge.not_started { background: #666; color: #eee; }
+
+        .timer-display {
+            font-size: 1.4rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .workout-timeline {
+            display: flex;
+            height: 28px;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #1a1a2e;
+            position: relative;
+        }
+
+        .timeline-segment {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.6rem;
+            font-weight: 600;
+            color: rgba(255,255,255,0.6);
+        }
+        .timeline-segment.warmup { background: rgba(245,158,11,0.25); flex: 5; }
+        .timeline-segment.main { background: rgba(74,222,128,0.25); flex: 50; }
+        .timeline-segment.cooldown { background: rgba(96,165,250,0.25); flex: 5; }
+
+        .timeline-segment.active { color: #fff; }
+        .timeline-segment.active.warmup { background: rgba(245,158,11,0.5); }
+        .timeline-segment.active.main { background: rgba(74,222,128,0.5); }
+        .timeline-segment.active.cooldown { background: rgba(96,165,250,0.5); }
+
+        .timeline-segment.completed { background: rgba(74,222,128,0.7); color: #fff; }
+
+        .progress-marker {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: #fff;
+            box-shadow: 0 0 8px rgba(255,255,255,0.8);
+            transition: left 1s linear;
+            z-index: 10;
+        }
+
+        /* Controls */
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 8px 22px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary { background: #4ade80; color: #1a1a2e; }
+        .btn-primary:hover { background: #5eeb95; }
+        .btn-danger { background: #f87171; color: white; }
+        .btn-danger:hover { background: #f98a8a; }
+        .btn-secondary { background: #3a3a5a; color: #eee; }
+        .btn-secondary:hover { background: #4a4a6a; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* Main Display - Power and HR side by side */
+        .main-display {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .big-metric {
+            background: linear-gradient(135deg, #2a2a4a 0%, #3a3a5a 100%);
+            border-radius: 12px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .big-metric-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .big-metric-label {
+            font-size: 0.7rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .big-metric-value {
+            font-size: 4.5rem;
+            font-weight: 700;
+            line-height: 1;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .power-metric .big-metric-value { color: #4ade80; }
+        .hr-metric .big-metric-value { color: #f87171; }
+
+        .unit-big { font-size: 1.5rem; color: #888; }
+
+        /* ERG Badge */
+        .erg-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            background: rgba(74, 222, 128, 0.15);
+            color: #4ade80;
+            border: 1px solid #4ade80;
+        }
+        .erg-badge.active { animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.3); }
+            50% { box-shadow: 0 0 10px 3px rgba(74, 222, 128, 0.2); }
+        }
+
+        /* Power bar */
+        .power-bar {
+            height: 8px;
+            background: #1a1a2e;
+            border-radius: 4px;
+            margin-top: 10px;
+            position: relative;
+        }
+        .power-bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            background: #4ade80;
+            transition: width 0.3s;
+        }
+        .power-bar-target {
+            position: absolute;
+            top: -2px;
+            width: 3px;
+            height: 12px;
+            background: white;
+            border-radius: 2px;
+            transform: translateX(-50%);
+        }
+
+        /* HR Heart animation */
+        .heart-icon {
+            font-size: 1.2rem;
+            color: #f87171;
+            animation: heartbeat 1s ease-in-out infinite;
+        }
+        @keyframes heartbeat {
+            0%, 100% { transform: scale(1); }
+            15% { transform: scale(1.15); }
+            30% { transform: scale(1); }
+            45% { transform: scale(1.1); }
+            60% { transform: scale(1); }
+        }
+
+        /* HR Graph */
+        .hr-graph {
+            flex: 1;
+            min-height: 60px;
+            margin-top: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hr-graph canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .hr-zone-indicator {
+            position: absolute;
+            right: 5px;
+            top: 5px;
+            font-size: 0.65rem;
+            padding: 2px 8px;
+            border-radius: 8px;
+            background: rgba(248, 113, 113, 0.2);
+            color: #f87171;
+        }
+
+        /* Secondary metrics grid */
+        .secondary-metrics {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 8px;
+        }
+
+        .metric-sm {
+            background: #2a2a4a;
+            border-radius: 10px;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .metric-sm-label {
+            font-size: 0.55rem;
+            color: #666;
+            text-transform: uppercase;
+            margin-bottom: 3px;
+        }
+
+        .metric-sm-value {
+            font-size: 1.3rem;
+            font-weight: 700;
+        }
+
+        .metric-sm .unit { font-size: 0.6rem; color: #666; }
+
+        /* Footer */
+        footer {
+            font-size: 0.6rem;
+            color: #555;
+            display: flex;
+            justify-content: space-between;
+        }
+        footer a { color: #4ade80; text-decoration: none; }
+
+        /* Settings Popup */
+        .settings-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+        .settings-overlay.open { display: flex; }
+
+        .settings-popup {
+            background: #2a2a4a;
+            border-radius: 16px;
+            padding: 20px;
+            width: 300px;
+            max-width: 90%;
+        }
+
+        .settings-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .settings-header h2 { font-size: 1rem; }
+        .close-btn {
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 1.5rem;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .close-btn:hover { color: #eee; }
+
+        .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #3a3a5a;
+            font-size: 0.8rem;
+        }
+        .setting-row:last-child { border-bottom: none; }
+
+        .setting-val { color: #4ade80; font-weight: 600; }
+
+        .setting-input {
+            width: 70px;
+            background: #1a1a2e;
+            border: 1px solid #3a3a5a;
+            border-radius: 6px;
+            padding: 5px 8px;
+            color: #eee;
+            font-size: 0.8rem;
+            text-align: center;
+        }
+
+        input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+
+        /* Device badge clickable */
+        .device-badge {
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .device-badge:hover { background: #3a3a5a; }
+
+        .erg-indicator {
+            font-size: 0.6rem;
+            margin-left: 2px;
+            opacity: 0.7;
+        }
+        .erg-indicator.disabled {
+            opacity: 0.3;
+            text-decoration: line-through;
+        }
+
+        /* Device list */
+        .device-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .device-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            background: #1a1a2e;
+            border-radius: 8px;
+            margin-bottom: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.8rem;
+        }
+        .device-item:hover { background: #3a3a5a; }
+        .device-item.connected {
+            border: 1px solid #4ade80;
+            background: rgba(74, 222, 128, 0.1);
+        }
+        .device-item.empty {
+            color: #666;
+            cursor: default;
+            font-style: italic;
+        }
+        .device-item.empty:hover { background: #1a1a2e; }
+
+        .device-name { font-weight: 600; }
+        .device-tags {
+            display: flex;
+            gap: 5px;
+        }
+        .device-tag {
+            font-size: 0.6rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: #3a3a5a;
+        }
+        .device-tag.erg { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+        .device-tag.no-erg { background: rgba(248, 113, 113, 0.2); color: #f87171; }
+
+        /* Alerts */
+        .alerts {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            width: 240px;
+            z-index: 1000;
+        }
+        .alert {
+            background: #2a2a4a;
+            border-radius: 8px;
+            padding: 8px 12px;
+            margin-bottom: 6px;
+            border-left: 3px solid;
+            font-size: 0.75rem;
+            animation: slideIn 0.2s ease-out;
+        }
+        .alert.warning { border-color: #fbbf24; }
+        .alert.critical { border-color: #f87171; }
+        .alert.success { border-color: #4ade80; }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* Big Flash Alert */
+        .flash-alert {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 4rem;
+            font-weight: 800;
+            text-align: center;
+            text-transform: uppercase;
+            padding: 30px 60px;
+            border-radius: 20px;
+            z-index: 2000;
+            animation: flashPulse 0.5s ease-in-out 3;
+            pointer-events: none;
+            text-shadow: 0 0 30px currentColor;
+        }
+        .flash-alert.warning {
+            background: rgba(251, 191, 36, 0.2);
+            color: #fbbf24;
+            border: 3px solid #fbbf24;
+        }
+        .flash-alert.critical {
+            background: rgba(248, 113, 113, 0.2);
+            color: #f87171;
+            border: 3px solid #f87171;
+        }
+        .flash-alert.success {
+            background: rgba(74, 222, 128, 0.2);
+            color: #4ade80;
+            border: 3px solid #4ade80;
+        }
+        @keyframes flashPulse {
+            0%, 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            50% { opacity: 0.7; transform: translate(-50%, -50%) scale(1.05); }
+        }
+
+        /* Mute button */
+        .mute-btn {
+            background: #2a2a4a;
+            border: none;
+            color: #888;
+            padding: 5px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-right: 8px;
+            transition: all 0.2s;
+        }
+        .mute-btn:hover { background: #3a3a5a; }
+        .mute-btn.muted { color: #f87171; }
+        .mute-btn.muted::after { content: ''; }
+
+        /* Workout selector */
+        .workout-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .workout-select {
+            flex: 1;
+            background: #1a1a2e;
+            border: 1px solid #3a3a5a;
+            border-radius: 8px;
+            padding: 8px 12px;
+            color: #eee;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+        .workout-select:focus {
+            outline: none;
+            border-color: #4ade80;
+        }
+        .workout-select option {
+            background: #1a1a2e;
+            padding: 8px;
+        }
+        .workout-hint {
+            font-size: 0.65rem;
+            color: #888;
+            margin-top: 4px;
+            font-style: italic;
+        }
+        .workout-duration {
+            font-size: 0.75rem;
+            color: #4ade80;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .intensity-badge {
+            font-size: 0.6rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        .intensity-badge.low { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+        .intensity-badge.medium-high { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+        .intensity-badge.high { background: rgba(248, 113, 113, 0.2); color: #f87171; }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-left">
+                <h1>Zone 2 Power Training</h1>
+                <div class="badges">
+                    <div class="badge device-badge" onclick="toggleDevices()">
+                        <div class="dot" id="trainer-dot"></div>
+                        <span id="trainer-name">KICKR</span>
+                        <span class="erg-indicator" id="erg-indicator" title="ERG capable">⚡</span>
+                    </div>
+                    <div class="badge"><div class="dot" id="hr-dot"></div>Myzone</div>
+                </div>
+            </div>
+            <div style="display: flex; align-items: center;">
+                <button class="mute-btn" id="mute-btn" onclick="toggleMute()" title="Mute voice alerts">🔊</button>
+                <button class="settings-btn" onclick="toggleSettings()">Settings</button>
+            </div>
+        </div>
+
+        <!-- Workout Timeline -->
+        <div class="workout-timeline-bar">
+            <div class="timeline-header">
+                <span class="phase-badge not_started" id="phase-badge">Ready</span>
+                <span class="timer-display" id="timer">00:00:00</span>
+            </div>
+            <div class="workout-timeline">
+                <div class="timeline-segment warmup" id="seg-warmup">Warmup</div>
+                <div class="timeline-segment main" id="seg-main">Zone 2 @ <span id="z2-pwr">150</span>W</div>
+                <div class="timeline-segment cooldown" id="seg-cooldown">Cool</div>
+                <div class="progress-marker" id="progress-marker" style="left: 0%"></div>
+            </div>
+        </div>
+
+        <!-- Workout Selector -->
+        <div class="workout-selector">
+            <select class="workout-select" id="workout-select" onchange="changeWorkout()">
+                <option value="zone2">Zone 2 Endurance</option>
+            </select>
+            <span class="workout-duration" id="workout-duration">60 min</span>
+            <span class="intensity-badge low" id="intensity-badge">Low</span>
+        </div>
+        <div class="workout-hint" id="workout-hint">Do this 2-3x per week for aerobic base</div>
+
+        <!-- Controls -->
+        <div class="controls">
+            <button class="btn btn-secondary" id="scan-btn" onclick="scan()">Scan Devices</button>
+            <button class="btn btn-primary" id="start-btn" onclick="start()" disabled>Start Workout</button>
+            <button class="btn btn-danger" id="stop-btn" onclick="stop()" disabled>Stop & Save</button>
+        </div>
+
+        <!-- Main Display: Power and HR -->
+        <div class="main-display">
+            <!-- Power -->
+            <div class="big-metric power-metric">
+                <div class="big-metric-header">
+                    <span class="big-metric-label">Power</span>
+                    <span class="erg-badge" id="erg-badge">ERG: --W</span>
+                </div>
+                <div class="big-metric-value" id="power-val">--<span class="unit-big">W</span></div>
+                <div class="power-bar">
+                    <div class="power-bar-fill" id="pwr-fill" style="width:0%"></div>
+                    <div class="power-bar-target" id="pwr-target" style="left:50%"></div>
+                </div>
+            </div>
+
+            <!-- Heart Rate -->
+            <div class="big-metric hr-metric">
+                <div class="big-metric-header">
+                    <span class="big-metric-label">Heart Rate</span>
+                    <span class="heart-icon" id="heart-icon">♥</span>
+                </div>
+                <div class="big-metric-value" id="hr-val">--<span class="unit-big">bpm</span></div>
+                <div class="hr-graph">
+                    <canvas id="hr-canvas"></canvas>
+                    <span class="hr-zone-indicator" id="hr-zone">--</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Secondary Metrics -->
+        <div class="secondary-metrics">
+            <div class="metric-sm">
+                <div class="metric-sm-label">Cadence</div>
+                <div class="metric-sm-value" id="cad-val">--<span class="unit">rpm</span></div>
+            </div>
+            <div class="metric-sm">
+                <div class="metric-sm-label">Speed</div>
+                <div class="metric-sm-value" id="spd-val">--<span class="unit">km/h</span></div>
+            </div>
+            <div class="metric-sm">
+                <div class="metric-sm-label">Avg Power</div>
+                <div class="metric-sm-value" id="avg-pwr">--<span class="unit">W</span></div>
+            </div>
+            <div class="metric-sm">
+                <div class="metric-sm-label">Avg HR</div>
+                <div class="metric-sm-value" id="avg-hr">--<span class="unit">bpm</span></div>
+            </div>
+            <div class="metric-sm">
+                <div class="metric-sm-label">Efficiency</div>
+                <div class="metric-sm-value" id="eff-val">--<span class="unit">W/bpm</span></div>
+            </div>
+            <div class="metric-sm">
+                <div class="metric-sm-label">Drift</div>
+                <div class="metric-sm-value" id="drift">--<span class="unit">%</span></div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer>
+            <span>FIT files: ./workouts/</span>
+            <span>Upload: <a href="https://www.strava.com/upload/select" target="_blank">Strava</a> | <a href="https://t.coros.com" target="_blank">COROS</a></span>
+        </footer>
+    </div>
+
+    <!-- Settings Popup -->
+    <div class="settings-overlay" id="settings-overlay" onclick="closeSettingsOnOverlay(event)">
+        <div class="settings-popup">
+            <div class="settings-header">
+                <h2>Settings</h2>
+                <button class="close-btn" onclick="toggleSettings()">×</button>
+            </div>
+            <div class="setting-row">
+                <span>FTP</span>
+                <input type="number" class="setting-input" id="ftp-in" value="215" onchange="updateFTP()">
+            </div>
+            <div class="setting-row">
+                <span>Zone 2 Target (70% FTP)</span>
+                <span class="setting-val" id="z2-target">150W</span>
+            </div>
+            <div class="setting-row">
+                <span>Zone 2 Range</span>
+                <span class="setting-val" id="z2-range">120-161W</span>
+            </div>
+            <div class="setting-row">
+                <span>Audio Alerts</span>
+                <input type="checkbox" id="audio-chk" checked onchange="updateSettings()">
+            </div>
+        </div>
+    </div>
+
+    <!-- Device Selection Popup -->
+    <div class="settings-overlay" id="devices-overlay" onclick="closeDevicesOnOverlay(event)">
+        <div class="settings-popup" style="width: 350px;">
+            <div class="settings-header">
+                <h2>Select Trainer</h2>
+                <button class="close-btn" onclick="toggleDevices()">×</button>
+            </div>
+            <div class="device-info">
+                <p style="font-size: 0.75rem; color: #888; margin-bottom: 10px;">
+                    Click "Scan Devices" first, then select a trainer below.
+                </p>
+            </div>
+            <div id="trainer-list" class="device-list">
+                <div class="device-item empty">No trainers found. Click Scan Devices.</div>
+            </div>
+            <div class="setting-row" style="margin-top: 15px; border-top: 1px solid #3a3a5a; padding-top: 15px;">
+                <span>Current</span>
+                <span class="setting-val" id="current-trainer">--</span>
+            </div>
+            <div class="setting-row">
+                <span>ERG Mode</span>
+                <span class="setting-val" id="erg-capable">--</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="alerts" id="alerts"></div>
+    <div id="flash-container"></div>
+
+    <script>
+        const socket = io();
+        let ftp = 215, targetPower = 0, workoutActive = false;
+        let audioMuted = false;
+
+        // HR Graph data
+        const hrHistory = [];
+        const HR_HISTORY_LENGTH = 120; // 2 minutes of data
+        let hrCanvas, hrCtx;
+
+        // Discovered trainers cache
+        let discoveredTrainers = [];
+        let currentTrainerName = 'KICKR';
+        let trainerHasErg = true;
+
+        // Workout types cache
+        let workoutTypes = [];
+        let currentWorkoutType = 'zone2';
+
+        function toggleMute() {
+            audioMuted = !audioMuted;
+            const btn = document.getElementById('mute-btn');
+            btn.textContent = audioMuted ? '🔇' : '🔊';
+            btn.classList.toggle('muted', audioMuted);
+            btn.title = audioMuted ? 'Unmute voice alerts' : 'Mute voice alerts';
+            socket.emit('update_settings', { audio_enabled: !audioMuted });
+        }
+
+        function showFlashAlert(msg, sev) {
+            const container = document.getElementById('flash-container');
+            const flash = document.createElement('div');
+            flash.className = `flash-alert ${sev}`;
+            flash.textContent = msg;
+            container.appendChild(flash);
+            setTimeout(() => flash.remove(), 1600);
+        }
+
+        socket.on('connect', () => socket.emit('get_config'));
+
+        socket.on('device_status', d => {
+            document.getElementById('trainer-dot').classList.toggle('on', d.trainer);
+            document.getElementById('hr-dot').classList.toggle('on', d.hr_monitor);
+            document.getElementById('start-btn').disabled = !d.trainer;
+
+            // Update trainer name display
+            if (d.trainer_name) {
+                currentTrainerName = d.trainer_name;
+                document.getElementById('trainer-name').textContent = d.trainer_name.split(' ')[0];
+            }
+
+            // Update ERG indicator
+            trainerHasErg = d.trainer_has_erg !== false;
+            const ergIndicator = document.getElementById('erg-indicator');
+            ergIndicator.classList.toggle('disabled', !trainerHasErg);
+            ergIndicator.title = trainerHasErg ? 'ERG capable' : 'No ERG (power meter only)';
+
+            // Update device popup info
+            document.getElementById('current-trainer').textContent = d.trainer ? currentTrainerName : '--';
+            document.getElementById('erg-capable').textContent = d.trainer ? (trainerHasErg ? 'Supported' : 'Not available') : '--';
+            document.getElementById('erg-capable').style.color = trainerHasErg ? '#4ade80' : '#f87171';
+        });
+
+        socket.on('scan_result', d => {
+            if (d.trainer) showAlert(`Found: ${d.trainer.name}`, 'success');
+            if (d.hr_monitor) showAlert(`Found: ${d.hr_monitor.name}`, 'success');
+            if (!d.trainer && !d.hr_monitor) showAlert('No devices found', 'warning');
+
+            // Store discovered trainers
+            if (d.trainers && d.trainers.length > 0) {
+                discoveredTrainers = d.trainers;
+                updateTrainerList();
+            }
+        });
+
+        socket.on('discovered_devices', d => {
+            discoveredTrainers = d.trainers || [];
+            currentTrainerName = d.current_trainer || currentTrainerName;
+            trainerHasErg = d.trainer_has_erg !== false;
+            updateTrainerList();
+        });
+
+        socket.on('config', d => {
+            ftp = d.ftp;
+            document.getElementById('ftp-in').value = ftp;
+            document.getElementById('z2-target').textContent = `${d.zone2_power}W`;
+            document.getElementById('z2-range').textContent = d.zone2_range;
+            document.getElementById('z2-pwr').textContent = d.zone2_power;
+            document.getElementById('audio-chk').checked = d.audio_enabled;
+            // Sync mute button with audio setting
+            audioMuted = !d.audio_enabled;
+            const btn = document.getElementById('mute-btn');
+            btn.textContent = audioMuted ? '🔇' : '🔊';
+            btn.classList.toggle('muted', audioMuted);
+
+            // Populate workout types
+            if (d.workout_types) {
+                workoutTypes = d.workout_types;
+                currentWorkoutType = d.current_workout_type || 'zone2';
+                updateWorkoutSelector();
+            }
+        });
+
+        socket.on('bike_data', d => {
+            document.getElementById('power-val').innerHTML = `${d.power}<span class="unit-big">W</span>`;
+            document.getElementById('cad-val').innerHTML = `${d.cadence}<span class="unit">rpm</span>`;
+            document.getElementById('spd-val').innerHTML = `${d.speed.toFixed(1)}<span class="unit">km/h</span>`;
+
+            const max = Math.max(ftp * 1.2, targetPower * 1.5, 200);
+            document.getElementById('pwr-fill').style.width = `${Math.min(100, (d.power / max) * 100)}%`;
+
+            if (targetPower > 0) {
+                const diff = Math.abs(d.power - targetPower) / targetPower;
+                document.getElementById('pwr-fill').style.background = diff < 0.05 ? '#4ade80' : diff < 0.15 ? '#fbbf24' : '#f87171';
+            }
+        });
+
+        socket.on('hr_data', d => {
+            const hr = d.heart_rate;
+            document.getElementById('hr-val').innerHTML = `${hr}<span class="unit-big">bpm</span>`;
+
+            // Update heart animation speed based on HR
+            const heartIcon = document.getElementById('heart-icon');
+            const beatDuration = Math.max(0.4, Math.min(1.2, 60 / hr));
+            heartIcon.style.animationDuration = `${beatDuration}s`;
+
+            // Update HR zone indicator
+            const zoneEl = document.getElementById('hr-zone');
+            if (hr < 120) {
+                zoneEl.textContent = 'Z1';
+                zoneEl.style.background = 'rgba(96, 165, 250, 0.2)';
+                zoneEl.style.color = '#60a5fa';
+            } else if (hr <= 140) {
+                zoneEl.textContent = 'Z2';
+                zoneEl.style.background = 'rgba(74, 222, 128, 0.2)';
+                zoneEl.style.color = '#4ade80';
+            } else if (hr <= 160) {
+                zoneEl.textContent = 'Z3';
+                zoneEl.style.background = 'rgba(251, 191, 36, 0.2)';
+                zoneEl.style.color = '#fbbf24';
+            } else {
+                zoneEl.textContent = 'Z4+';
+                zoneEl.style.background = 'rgba(248, 113, 113, 0.2)';
+                zoneEl.style.color = '#f87171';
+            }
+
+            // Add to history and draw graph
+            hrHistory.push(hr);
+            if (hrHistory.length > HR_HISTORY_LENGTH) hrHistory.shift();
+            drawHRGraph();
+        });
+
+        socket.on('erg_power', d => {
+            targetPower = d.target;
+            const badge = document.getElementById('erg-badge');
+            badge.textContent = targetPower > 0 ? `ERG: ${targetPower}W` : 'ERG: Off';
+            badge.classList.toggle('active', targetPower > 0);
+            const max = Math.max(ftp * 1.2, targetPower * 1.5, 200);
+            document.getElementById('pwr-target').style.left = `${(targetPower / max) * 100}%`;
+        });
+
+        socket.on('workout_status', d => {
+            const progress = (d.elapsed_seconds / d.total_duration) * 100;
+            document.getElementById('progress-marker').style.left = `${progress}%`;
+
+            const badge = document.getElementById('phase-badge');
+            badge.textContent = d.segment_name || 'Ready';
+            badge.className = 'phase-badge ' + d.phase;
+
+            const e = d.elapsed_seconds;
+            document.getElementById('timer').textContent = `${Math.floor(e/3600).toString().padStart(2,'0')}:${Math.floor((e%3600)/60).toString().padStart(2,'0')}:${(e%60).toString().padStart(2,'0')}`;
+
+            document.getElementById('seg-warmup').classList.toggle('active', d.phase === 'warmup');
+            document.getElementById('seg-main').classList.toggle('active', d.phase === 'main');
+            document.getElementById('seg-cooldown').classList.toggle('active', d.phase === 'cooldown');
+
+            if (d.phase === 'main' || d.phase === 'cooldown' || d.phase === 'completed') {
+                document.getElementById('seg-warmup').classList.add('completed');
+            }
+            if (d.phase === 'cooldown' || d.phase === 'completed') {
+                document.getElementById('seg-main').classList.add('completed');
+            }
+        });
+
+        socket.on('phase_change', d => {
+            showAlert(d.name, 'success');
+            showFlashAlert(d.name, 'success');
+        });
+
+        socket.on('stats', d => {
+            document.getElementById('avg-pwr').innerHTML = d.avg_power > 0 ? `${Math.round(d.avg_power)}<span class="unit">W</span>` : `--<span class="unit">W</span>`;
+            document.getElementById('avg-hr').innerHTML = d.avg_hr > 0 ? `${Math.round(d.avg_hr)}<span class="unit">bpm</span>` : `--<span class="unit">bpm</span>`;
+            document.getElementById('drift').innerHTML = d.cardiac_drift_percent ? `${d.cardiac_drift_percent.toFixed(1)}<span class="unit">%</span>` : `--<span class="unit">%</span>`;
+            document.getElementById('eff-val').innerHTML = d.efficiency_factor > 0 ? `${d.efficiency_factor.toFixed(2)}<span class="unit"></span>` : `--<span class="unit"></span>`;
+        });
+
+        socket.on('alert', d => {
+            showAlert(d.message, d.severity);
+            // Show flash alert for warnings and critical alerts during workout
+            if (workoutActive && (d.severity === 'warning' || d.severity === 'critical')) {
+                showFlashAlert(d.message, d.severity);
+            }
+        });
+        socket.on('workout_saved', d => showAlert(`Saved: ${d.filename.split('/').pop()}`, 'success'));
+        socket.on('workout_complete', () => {
+            workoutActive = false;
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('stop-btn').disabled = true;
+            showAlert('Workout complete!', 'success');
+            showFlashAlert('Complete!', 'success');
+        });
+
+        function scan() {
+            document.getElementById('scan-btn').disabled = true;
+            document.getElementById('scan-btn').textContent = 'Scanning...';
+            socket.emit('scan_devices');
+            setTimeout(() => {
+                document.getElementById('scan-btn').disabled = false;
+                document.getElementById('scan-btn').textContent = 'Scan Devices';
+            }, 12000);
+        }
+
+        function start() {
+            socket.emit('start_workout');
+            workoutActive = true;
+            document.getElementById('start-btn').disabled = true;
+            document.getElementById('stop-btn').disabled = false;
+            document.querySelectorAll('.timeline-segment').forEach(s => s.classList.remove('completed', 'active'));
+            hrHistory.length = 0; // Clear HR history
+        }
+
+        function stop() {
+            socket.emit('stop_workout');
+            workoutActive = false;
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('stop-btn').disabled = true;
+        }
+
+        function toggleSettings() {
+            document.getElementById('settings-overlay').classList.toggle('open');
+        }
+
+        function closeSettingsOnOverlay(e) {
+            if (e.target.id === 'settings-overlay') toggleSettings();
+        }
+
+        function toggleDevices() {
+            document.getElementById('devices-overlay').classList.toggle('open');
+            if (document.getElementById('devices-overlay').classList.contains('open')) {
+                socket.emit('get_discovered_devices');
+            }
+        }
+
+        function closeDevicesOnOverlay(e) {
+            if (e.target.id === 'devices-overlay') toggleDevices();
+        }
+
+        function updateTrainerList() {
+            const list = document.getElementById('trainer-list');
+
+            if (discoveredTrainers.length === 0) {
+                list.innerHTML = '<div class="device-item empty">No trainers found. Click Scan Devices.</div>';
+                return;
+            }
+
+            list.innerHTML = discoveredTrainers.map(t => {
+                const isConnected = t.name === currentTrainerName;
+                const hasErg = t.has_erg !== false;
+                return `
+                    <div class="device-item ${isConnected ? 'connected' : ''}" onclick="connectToTrainer('${t.address}', '${t.name}')">
+                        <span class="device-name">${t.name || 'Unknown'}</span>
+                        <div class="device-tags">
+                            ${t.type ? `<span class="device-tag">${t.type}</span>` : ''}
+                            <span class="device-tag ${hasErg ? 'erg' : 'no-erg'}">${hasErg ? 'ERG' : 'No ERG'}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function connectToTrainer(address, name) {
+            showAlert(`Connecting to ${name}...`, 'success');
+            socket.emit('connect_trainer', { address: address, name: name });
+            toggleDevices();
+        }
+
+        function updateFTP() {
+            socket.emit('update_ftp', { ftp: parseInt(document.getElementById('ftp-in').value) || 215 });
+        }
+
+        function updateSettings() {
+            const audioEnabled = document.getElementById('audio-chk').checked;
+            audioMuted = !audioEnabled;
+            const btn = document.getElementById('mute-btn');
+            btn.textContent = audioMuted ? '🔇' : '🔊';
+            btn.classList.toggle('muted', audioMuted);
+            socket.emit('update_settings', { audio_enabled: audioEnabled });
+        }
+
+        function updateWorkoutSelector() {
+            const select = document.getElementById('workout-select');
+            select.innerHTML = workoutTypes.map(w => {
+                const hint = w.id === 'vo2max' ? ' (best if 1x/week cycling)' : '';
+                return `<option value="${w.id}" ${w.id === currentWorkoutType ? 'selected' : ''}>${w.name}${hint}</option>`;
+            }).join('');
+
+            // Update hint and duration
+            updateWorkoutDisplay(currentWorkoutType);
+        }
+
+        function updateWorkoutDisplay(workoutId) {
+            const workout = workoutTypes.find(w => w.id === workoutId);
+            if (!workout) return;
+
+            document.getElementById('workout-duration').textContent = `${workout.duration_minutes} min`;
+            document.getElementById('workout-hint').textContent = workout.frequency_hint;
+
+            // Update intensity badge
+            const badge = document.getElementById('intensity-badge');
+            badge.textContent = workout.intensity;
+            badge.className = 'intensity-badge ' + workout.intensity.toLowerCase().replace('-', '-');
+        }
+
+        function changeWorkout() {
+            if (workoutActive) {
+                showAlert('Cannot change workout while active', 'warning');
+                document.getElementById('workout-select').value = currentWorkoutType;
+                return;
+            }
+
+            const newType = document.getElementById('workout-select').value;
+            currentWorkoutType = newType;
+            socket.emit('set_workout_type', { workout_type: newType });
+            updateWorkoutDisplay(newType);
+        }
+
+        function showAlert(msg, sev) {
+            const c = document.getElementById('alerts');
+            const a = document.createElement('div');
+            a.className = `alert ${sev}`;
+            a.textContent = msg;
+            c.appendChild(a);
+            setTimeout(() => { a.style.opacity = '0'; setTimeout(() => a.remove(), 200); }, 3000);
+        }
+
+        // HR Graph drawing
+        function initHRGraph() {
+            hrCanvas = document.getElementById('hr-canvas');
+            hrCtx = hrCanvas.getContext('2d');
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+        }
+
+        function resizeCanvas() {
+            const rect = hrCanvas.parentElement.getBoundingClientRect();
+            hrCanvas.width = rect.width * window.devicePixelRatio;
+            hrCanvas.height = rect.height * window.devicePixelRatio;
+            hrCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+            drawHRGraph();
+        }
+
+        function drawHRGraph() {
+            if (!hrCtx || hrHistory.length < 2) return;
+
+            const w = hrCanvas.width / window.devicePixelRatio;
+            const h = hrCanvas.height / window.devicePixelRatio;
+
+            hrCtx.clearRect(0, 0, w, h);
+
+            // Draw zone backgrounds
+            const minHR = 60, maxHR = 180;
+            const z2Top = h - ((140 - minHR) / (maxHR - minHR)) * h;
+            const z2Bottom = h - ((120 - minHR) / (maxHR - minHR)) * h;
+
+            hrCtx.fillStyle = 'rgba(74, 222, 128, 0.1)';
+            hrCtx.fillRect(0, z2Top, w, z2Bottom - z2Top);
+
+            // Draw HR line
+            hrCtx.beginPath();
+            hrCtx.strokeStyle = '#f87171';
+            hrCtx.lineWidth = 2;
+            hrCtx.lineJoin = 'round';
+
+            const step = w / (HR_HISTORY_LENGTH - 1);
+            const startIdx = Math.max(0, hrHistory.length - HR_HISTORY_LENGTH);
+
+            for (let i = 0; i < hrHistory.length; i++) {
+                const x = (i - startIdx + (HR_HISTORY_LENGTH - hrHistory.length)) * step;
+                const y = h - ((hrHistory[i] - minHR) / (maxHR - minHR)) * h;
+
+                if (i === 0) {
+                    hrCtx.moveTo(x, y);
+                } else {
+                    hrCtx.lineTo(x, y);
+                }
+            }
+            hrCtx.stroke();
+
+            // Draw glow effect
+            hrCtx.strokeStyle = 'rgba(248, 113, 113, 0.3)';
+            hrCtx.lineWidth = 6;
+            hrCtx.stroke();
+        }
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', initHRGraph);
+    </script>
+</body>
+</html>

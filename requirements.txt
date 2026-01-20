@@ -1,0 +1,19 @@
+# BLE connectivity
+bleak>=0.21.0
+
+# Web framework
+flask>=3.0.0
+flask-socketio>=5.3.0
+
+# FIT file generation
+fit-tool>=0.9.13
+
+# Audio alerts
+pyttsx3>=2.90
+
+# Async support
+eventlet>=0.33.0
+
+# Data handling
+numpy>=1.24.0
+requests>=2.31.0

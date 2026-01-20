@@ -1,0 +1,24 @@
+{
+    "user": {
+        "ftp": 231,
+        "max_hr": 190,
+        "zone2_hr_low": 124,
+        "zone2_hr_high": 143
+    },
+    "workout": {
+        "warmup_minutes": 5,
+        "main_minutes": 50,
+        "cooldown_minutes": 5,
+        "zone2_percent_ftp": 65
+    },
+    "alerts": {
+        "power_deviation_threshold_percent": 10,
+        "cardiac_drift_threshold_percent": 5,
+        "audio_enabled": true,
+        "visual_enabled": true
+    },
+    "devices": {
+        "trainer_name": "KICKR",
+        "hr_monitor_name": "MYZONE"
+    }
+}
